@@ -29,7 +29,7 @@ const masterDBConfig = {
 }
 const clientDBConfig = {
     ...baseDBConfig,
-    database: 'ADAMSSE'}
+    database: 'MASHIZ'}
 
 // Master DB connection pool
 export const SqlServerDB = new sql.ConnectionPool(clientDBConfig);
