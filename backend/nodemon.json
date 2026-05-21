@@ -1,0 +1,11 @@
+{
+  "watch": ["**/*.js", "**/*.mjs", "**/*.cjs", "**/*.json"],
+  "ignore": [
+    "node_modules/**",
+    "logs/**",
+    "**/*.log",
+    ".git/**",
+    "package-lock.json"
+  ],
+  "ext": "js,mjs,cjs,json"
+}

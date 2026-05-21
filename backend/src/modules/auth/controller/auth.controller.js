@@ -1,0 +1,203 @@
+import { asyncHandler } from "../../../utils/errorHandling.js";
+import {
+  findClientIdByEmail,
+  findConnectionInfoByClientId,
+} from "../../../../DB/quires.js";
+import { generateToken } from "../../../utils/generateAndVerifyToken.js";
+import {
+  connectToDatabase,
+  connectToSqlDB,
+} from "../../../../DB/sqlConnection.js";
+import { prisma } from "../../../utils/prismaClient.js";
+import logger from "../../../utils/logger.js";
+
+export const login = asyncHandler(async (req, res) => {
+  const { email, password } = req.body;
+
+  // 1. Validate input
+  if (!email || !password) {
+    return res.status(400).json({ message: "Email and password are required" });
+  }
+
+  // 2. Connect to master database
+  try {
+    await connectToSqlDB();
+  } catch (err) {
+    logger.error("Login: master DB connection failed:", err.message);
+    return res.status(503).json({ message: "Cannot reach the authentication server. Please try again later." });
+  }
+
+  // 3. Find client ID using email/password
+  let clientId;
+  try {
+    clientId = await findClientIdByEmail(email, password);
+  } catch (err) {
+    // Invalid credentials throws from findClientIdByEmail
+    return res.status(401).json({ message: "Invalid email or password" });
+  }
+
+  if (!clientId) {
+    return res.status(401).json({ message: "Invalid email or password" });
+  }
+
+  // 4. Get connection info for the client
+  let connInfo;
+  try {
+    connInfo = await findConnectionInfoByClientId(clientId);
+  } catch (err) {
+    logger.error("Login: failed to get client connection info:", err.message);
+    return res.status(404).json({ message: "Client configuration not found" });
+  }
+
+  if (!connInfo || !connInfo.SQL_DB_NAME) {
+    return res.status(404).json({ message: "Client database not configured" });
+  }
+
+  const databaseName = connInfo.SQL_DB_NAME;
+
+  // 5. Generate JWT token
+  const token = generateToken({
+    payload: {
+      clientId,
+      email,
+      databaseName,
+    },
+  });
+
+  const isDev = process.env.NODE_ENV === "development";
+
+  // 6. Set cookie
+  res.cookie("jwt", token, {
+    httpOnly: true,
+    sameSite: isDev ? "Lax" : "None",
+    secure: !isDev,
+    maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+  });
+
+  // 7. Respond — do NOT await client DB connection here (avoids 30s hang on login)
+  res.status(200).json({
+    message: "success",
+    databaseName,
+    CLIENT_ID: clientId,
+    activeUsers: connInfo.ACTIVE_USERS,
+    token,
+  });
+});
+
+/** 🔹 Get current database name from JWT token (lightweight) */
+export const getCurrentDatabase = asyncHandler(async (req, res) => {
+  const databaseName = req.user?.databaseName;
+  const email = req.user?.email;
+  const clientId = req.user?.clientId;
+
+  if (!databaseName) {
+    res.status(404);
+    throw new Error("Database name not found in token");
+  }
+
+  res.status(200).json({
+    success: true,
+    databaseName,
+    email,
+    clientId,
+  });
+});
+
+export const connectClient = asyncHandler(async (req, res) => {
+  const clientId = req.user?.clientId; // <-- From JWT
+
+  if (!clientId) {
+    res.status(401);
+    throw new Error("Unauthorized: Client ID not found in token");
+  }
+
+  // Connect to master DB
+  await connectToSqlDB();
+
+  // Get client DB connection info
+  const connInfo = await findConnectionInfoByClientId(clientId);
+
+  if (!connInfo || !connInfo.SQL_DB_NAME) {
+    res.status(404);
+    throw new Error("Client database not found");
+  }
+
+  const databaseName = connInfo.SQL_DB_NAME;
+
+  let clientConnection;
+
+  try {
+    // Connect to the client database
+    clientConnection = await connectToDatabase(databaseName);
+
+    // Query branches
+    const branchesResult = await clientConnection.request().query(`
+SELECT 
+  BRANCH_CODE,
+  BRANCH_NAME,
+  COMPANY
+FROM SYS_COMPANY_BRANCHES
+WHERE Active = 1
+ORDER BY BRANCH_NAME;
+    `);
+
+    const branches = Array.isArray(branchesResult.recordset)
+      ? branchesResult.recordset
+      : [];
+
+    const sanitizedBranches = branches
+      .map((branch) => ({
+        branchCode: branch.BRANCH_CODE?.trim(),
+        branchName: branch.BRANCH_NAME?.trim(),
+        company: branch.COMPANY?.trim(),
+      }))
+      .filter(({ branchCode, branchName }) =>
+        Boolean(branchCode && branchName)
+      );
+
+    if (sanitizedBranches.length > 0) {
+      const operations = sanitizedBranches.map((branch) =>
+        prisma.restaurantBranch.upsert({
+          where: { branch_code: branch.branchCode },
+          update: {
+            branch_name: branch.branchName,
+            company: branch.company || null,
+          },
+          create: {
+            branch_code: branch.branchCode,
+            branch_name: branch.branchName,
+            company: branch.company || null,
+          },
+        })
+      );
+
+      try {
+        await prisma.$transaction(operations);
+      } catch (error) {
+        logger.error("Failed to sync branches to restaurant_branches", {
+          error: error?.message || error,
+        });
+        throw error;
+      }
+    }
+
+    res.status(200).json({
+      success: true,
+      message: `✅ Connected to ${databaseName} and fetched branches`,
+      databaseName,
+      CLIENT_ID: clientId,
+      activeUsers: connInfo.ACTIVE_USERS,
+      branches,
+    });
+  } finally {
+    if (clientConnection) {
+      try {
+        await clientConnection.close();
+      } catch (error) {
+        logger.warn("Failed to close client database connection", {
+          error: error?.message || error,
+        });
+      }
+    }
+  }
+});

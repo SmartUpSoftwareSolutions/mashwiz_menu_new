@@ -1,0 +1,296 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Model for customer details
+model CustomerDetails {
+  id         String   @id @default(uuid())
+  first_name String
+  last_name  String
+  email      String?  @unique
+  phone      String?  @unique
+  notes      String?  @db.Text
+  created_at DateTime @map("created_at") @default(now())
+  updated_at DateTime @map("updated_at") @default(now()) @updatedAt
+
+  @@map("customer_details")
+}
+
+// Model for menu categories (item main groups)
+model ItemMainGroup {
+  idPrimary             Int      @id @default(autoincrement()) @map("id_primary")
+  itm_group_code        String   @map("itm_group_code")
+  itm_group_name        String
+  show_in_website       Boolean?
+  order_group           Int?
+  website_description_ar String? @db.Text
+  website_description_en String? @db.Text
+  website_name_ar       String?
+  website_name_en       String?
+  comment_en            String?  @db.Text
+  comment_ar            String?  @db.Text
+  saleable              Boolean?
+  nested_level          Int?
+  parent_group_code     String?
+  path                  String?  @db.Text
+  branch_code           String?
+
+  items ItemMaster[]
+
+  @@map("item_main_group")
+
+  @@unique([itm_group_code, branch_code], name: "item_main_group_code_branch_code_unique")
+  @@index([show_in_website])
+  @@index([saleable])
+  @@index([branch_code])
+  @@index([nested_level])
+  @@index([parent_group_code])
+}
+
+
+// Model for menu items
+model ItemMaster {
+  id                     Int      @id @default(autoincrement()) @map("id")
+  itm_code               String   @map("itm_code")
+  itm_name               String
+  itm_group_code         String?  @map("itm_group_code")
+  photo_url              Bytes?
+  image                  String?
+  item_order             Int?
+  image_order            Int? 
+  sales_price            Decimal? @db.Decimal(10, 2)
+  show_in_website        Boolean?
+  website_description_ar String?  @db.Text
+  website_description_en String?  @db.Text
+  website_name_ar        String?
+  website_name_en        String?
+  saleable               Boolean?
+  fasting                Boolean?
+  vegetarian             Boolean?
+  healthy_choice         Boolean?
+  signature_dish         Boolean?
+  spicy                  Boolean?
+  branch_code            String?
+
+  item_group ItemMainGroup? @relation(fields: [itm_group_code, branch_code], references: [itm_group_code, branch_code], onDelete: SetNull)
+
+  @@map("item_master")
+
+  @@unique([itm_code, branch_code], name: "item_master_code_branch_code_unique")
+  @@index([itm_group_code])
+  @@index([item_order])
+  @@index([show_in_website])
+  @@index([saleable])
+  @@index([branch_code])
+}
+
+model Tags {
+  id            String   @id @map("id") @db.Char(36) // Matches the existing char(36) primary key
+  fasting       String?  @map("fasting")
+  vegetarian    String?  @map("vegetarian")
+  healthy_choice String? @map("healthy_choice")
+  signature_dish String? @map("signature_dish")
+  spicy         String?  @map("spicy")
+  created_at    DateTime @map("created_at") @default(now())
+  updated_at    DateTime @map("updated_at") @default(now()) @updatedAt
+
+  @@map("tags")
+}
+
+// Model for website themes
+model WebTheme {
+  theme_id         String   @id @map("theme_id")
+  theme_name       String
+  background_color String
+  primary_color    String
+  secondary_color  String
+  text_color       String
+  is_default       Boolean  @default(false)
+  created_at       DateTime @map("created_at") @default(now())
+  updated_at       DateTime @map("updated_at") @default(now()) @updatedAt
+
+  restaurants RestaurantInfo[]
+
+  @@map("web_themes")
+}
+
+// Model for restaurant information
+model RestaurantInfo {
+  id                String   @id @default(uuid())
+  name              String
+  slogan            String?  @db.Text
+  footer            String?  @db.Text
+  footer_ar         String?  @db.Text
+  logo_url          String?
+  logo_blob         Bytes?
+  style             String
+  show_all_category Boolean? @default(true)
+  theme_id          String?  @map("theme_id")
+  created_at        DateTime @map("created_at") @default(now())
+  updated_at        DateTime @map("updated_at") @default(now()) @updatedAt
+  branch_code       String?
+
+  theme WebTheme? @relation(fields: [theme_id], references: [theme_id], onDelete: SetNull)
+
+  @@map("restaurant_info")
+
+  @@index([branch_code])
+  @@index([theme_id])
+}
+
+model RestaurantBranch {
+  id          String   @id @default(uuid())
+  branch_code String   @unique
+  branch_name String
+  company     String?
+  created_at  DateTime @default(now())
+  updated_at  DateTime @updatedAt
+
+  @@map("restaurant_branches")
+  @@index([branch_code])
+}
+
+
+// Model for social media links
+model SocialLink {
+  id          String   @id @map("id")
+  platform    String
+  bgColor     String?
+  textColor   String?
+  borderColor String?
+  url         String
+  links_order Int?
+  created_at  DateTime @map("created_at") @default(now())
+  updated_at  DateTime @map("updated_at") @default(now()) @updatedAt
+
+  @@map("social_links")
+}
+
+
+// Model for storage buckets
+model Bucket {
+  id              String   @id @default(uuid())
+  name            String
+  public          Boolean
+  file_size_limit BigInt?
+  created_at      DateTime @default(now())
+  updated_at      DateTime @map("updated_at") @default(now()) @updatedAt
+
+  @@map("buckets")
+}
+
+// Model for locations
+model Location {
+  id             String   @id @default(uuid()) @map("id")
+  name           String   @map("name")
+  address        String   @map("address")
+  location_order Int?     @map("location_order")
+  city           String   @map("city")
+  map_link       String   @map("map_link")
+  phone          String?  @map("phone")
+  is_open_24_7   Boolean? @map("is_open_24_7")
+  working_hours  Json?    @map("working_hours")
+  created_at     DateTime @map("created_at") @default(now())
+  updated_at     DateTime @map("updated_at") @default(now()) @updatedAt
+
+  @@map("locations")
+}
+
+// Model for survey settings (description, etc.)
+model SurveySettings {
+  id             String   @id @default(uuid())
+  description_en String   @db.Text @default("Help us improve by sharing your feedback. Your opinion matters!")
+  description_ar String   @db.Text @default("ساعدنا في التحسين من خلال مشاركة ملاحظاتك. رأيك يهمنا!")
+  is_active      Boolean  @default(true)
+  created_at     DateTime @map("created_at") @default(now())
+  updated_at     DateTime @map("updated_at") @default(now()) @updatedAt
+
+  @@map("survey_settings")
+}
+
+// Model for survey questions with bilingual support (Arabic/English)
+model SurveyQuestion {
+  id            String   @id @default(uuid())
+  question_en   String   @db.Text
+  question_ar   String   @db.Text
+  question_type String   @default("rating") // 'rating', 'text', 'yes_no', 'multiple_choice'
+  choices       Json?    // Array of {id, text_en, text_ar} for multiple_choice
+  is_active     Boolean  @default(true)
+  display_order Int      @default(0)
+  created_at    DateTime @map("created_at") @default(now())
+  updated_at    DateTime @map("updated_at") @default(now()) @updatedAt
+
+  responses SurveyResponse[]
+
+  @@map("survey_questions")
+  @@index([is_active])
+  @@index([display_order])
+}
+
+// Model for survey responses from customers
+model SurveyResponse {
+  id              String   @id @default(uuid())
+  question_id     String   @map("question_id")
+  rating          Int?
+  text_response   String?  @db.Text
+  selected_choice String?
+  customer_name   String?
+  customer_email  String?
+  customer_phone  String?
+  session_id      String
+  created_at      DateTime @map("created_at") @default(now())
+
+  question SurveyQuestion @relation(fields: [question_id], references: [id], onDelete: Cascade)
+
+  @@map("survey_responses")
+  @@index([question_id])
+  @@index([session_id])
+  @@index([created_at])
+}
+
+// Named branches for display (code → display name mapping)
+model Branch {
+  id       String  @id @default(uuid())
+  code     String  @unique
+  name     String
+  name_ar  String?
+
+  @@map("branches")
+  @@index([code])
+}
+
+// Promotions
+model Promotion {
+  id         String   @id @default(uuid())
+  title      String?
+  image_url  String
+  amount     String?
+  date_from  DateTime
+  date_to    DateTime
+  is_active  Boolean  @default(true)
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  @@map("promotions")
+  @@index([is_active])
+  @@index([date_from])
+  @@index([date_to])
+}
+
+// Button click analytics
+model ButtonClick {
+  id          String   @id @default(uuid())
+  button_name String
+  user_id     String?
+  clicked_at  DateTime @default(now())
+  created_at  DateTime @default(now())
+
+  @@map("button_clicks")
+  @@index([button_name])
+  @@index([clicked_at])
+}
