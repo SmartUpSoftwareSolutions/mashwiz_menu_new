@@ -117,7 +117,7 @@ class MenuService {
   }
 
   static async fetchParentCategories(branch_code, limit, offset) {
-    return prisma.itemMainGroup.findMany({
+    const categories = await prisma.itemMainGroup.findMany({
       where: {
         show_in_website: true,
         saleable: true,
@@ -138,6 +138,17 @@ class MenuService {
       skip: offset,
       orderBy: { order_group: "asc" },
     });
+
+    return categories.map((cat) => ({
+      id: cat.itm_group_code,
+      name: cat.website_name_en || cat.itm_group_name,
+      nameAr: cat.website_name_ar,
+      orderGroup: cat.order_group,
+      nested_level: Number(cat.nested_level),
+      parent_group_code: cat.parent_group_code,
+      path: cat.path,
+      children: [],
+    }));
   }
 
   static async countParentCategories(branch_code) {
@@ -152,7 +163,7 @@ class MenuService {
   }
 
   static async fetchSubCategories(branch_code, parentId, limit, offset) {
-    return prisma.itemMainGroup.findMany({
+    const categories = await prisma.itemMainGroup.findMany({
       where: {
         show_in_website: true,
         saleable: true,
@@ -174,6 +185,17 @@ class MenuService {
       skip: offset,
       orderBy: { order_group: "asc" },
     });
+
+    return categories.map((cat) => ({
+      id: cat.itm_group_code,
+      name: cat.website_name_en || cat.itm_group_name,
+      nameAr: cat.website_name_ar,
+      orderGroup: cat.order_group,
+      nested_level: Number(cat.nested_level),
+      parent_group_code: cat.parent_group_code,
+      path: cat.path,
+      children: [],
+    }));
   }
 
   static async countSubCategories(branch_code, parentId) {
