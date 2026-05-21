@@ -307,6 +307,17 @@ export const updateMenuItem = async (item: MenuItem) => {
 
 // ─── React Query hooks ────────────────────────────────────────────────────────
 
+export const useAdminMenuItems = (branchCode?: string | null) =>
+  useQuery({
+    queryKey: ["adminMenuItems", branchCode ?? "all"],
+    queryFn: () => fetchAdminMenuItems(branchCode),
+    staleTime: 1000 * 60 * 5,
+    gcTime: 1000 * 60 * 30,
+    refetchOnWindowFocus: false,
+    refetchOnMount: true,
+    placeholderData: (prev) => prev,
+  });
+
 export const useMenuItems = (branchCode?: string | null) =>
   useQuery({
     queryKey: ["menuItems", branchCode ?? "default"],

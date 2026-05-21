@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { useMenuItems, uploadMenuItemPhoto, MenuCategory, MenuItem } from '@/services/menuServices';
+import { useAdminMenuItems, uploadMenuItemPhoto, MenuCategory, MenuItem } from '@/services/menuServices';
 import { useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/apiClient';
 import { toast } from 'sonner';
@@ -19,8 +19,8 @@ interface MenuItemFormData {
   sales_price: string;
   itm_group_code: string;
   photo_url: string;
-  image: string;
   show_in_website: boolean;
+  saleable: boolean;
   fasting: boolean;
   vegetarian: boolean;
   healthyChoice: boolean;
@@ -47,7 +47,7 @@ const AdminMenuItems = () => {
     data: menuItems,
     isLoading: isLoadingItems,
     refetch: refetchItems
-  } = useMenuItems();
+  } = useAdminMenuItems();
 
   interface MenuCategoryWithBranch extends MenuCategory {
     branchCode?: string | null;
@@ -200,7 +200,7 @@ const AdminMenuItems = () => {
           website_description_ar: data.website_description_ar,
           sales_price: data.sales_price ? parseFloat(data.sales_price) : null,
           itm_group_code: data.itm_group_code,
-          image: data.image,
+          image: photoUrl ?? null,
           fasting: data.fasting === true,
           vegetarian: data.vegetarian === true,
           healthy_choice: data.healthyChoice === true,
@@ -242,7 +242,7 @@ const AdminMenuItems = () => {
           website_description_ar: data.website_description_ar,
           sales_price: data.sales_price ? parseFloat(data.sales_price) : null,
           itm_group_code: data.itm_group_code,
-          image: data.image,
+          image: photoUrl ?? null,
           show_in_website: true,
           fasting: data.fasting === true,
           vegetarian: data.vegetarian === true,
@@ -253,7 +253,7 @@ const AdminMenuItems = () => {
         toast.success("Item created successfully");
       }
 
-      // Invalidate all menuItems caches so the guest menu picks up the change
+      await queryClient.invalidateQueries({ queryKey: ["adminMenuItems"] });
       await queryClient.invalidateQueries({ queryKey: ["menuItems"] });
 
       setIsOpen(false);

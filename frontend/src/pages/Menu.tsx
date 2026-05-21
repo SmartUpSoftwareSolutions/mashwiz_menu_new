@@ -1287,7 +1287,10 @@ const Menu = () => {
       </main>
 
       {(restaurantInfo?.footer || restaurantInfo?.footer_ar) && (
-        <footer className="fixed bottom-0 left-0 right-0 z-50 border-t border-gray-100 bg-white py-3 px-4 text-center text-sm text-gray-500 shadow-[0_-1px_4px_rgba(0,0,0,0.06)]">
+        <footer
+          className="fixed bottom-0 left-0 right-0 z-50 border-t border-gray-100 bg-white py-3 px-4 text-center text-sm text-gray-500 shadow-[0_-1px_4px_rgba(0,0,0,0.06)]"
+          dir={language === "ar" ? "rtl" : "ltr"}
+        >
           {language === "ar" && restaurantInfo.footer_ar
             ? restaurantInfo.footer_ar
             : restaurantInfo.footer}

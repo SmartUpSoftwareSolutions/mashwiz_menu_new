@@ -10,7 +10,6 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { SocialLink } from '@/services/socialLinkServices';
 
 const Index = () => {
-  const defaultLogoPath = '/mashwiz.jpg';
   const { t } = useTranslation();
   const { language, setLanguage } = useLanguage() || { language: 'en', setLanguage: () => {} };
 
@@ -22,7 +21,7 @@ const Index = () => {
   });
 
   const loading = loadingSocialLinks || loadingRestaurantInfo;
-  const logoPath = restaurantInfo?.logo_url || defaultLogoPath;
+  const logoPath = restaurantInfo?.logo_url || null;
 
   const [sortConfig] = useState<{ direction: 'ascending' | 'descending' }>({
     direction: 'ascending',
@@ -54,20 +53,19 @@ const Index = () => {
       {/* Hero section */}
       <div className="flex flex-col items-center pt-6 pb-8 px-6">
         {/* Logo */}
-        <div className="mb-5">
-          {loadingRestaurantInfo ? (
-            <Skeleton className="h-32 w-32 rounded-2xl" />
-          ) : (
-            <img
-              src={logoPath}
-              alt={restaurantInfo?.name || 'Restaurant'}
-              className="h-32 w-32 object-contain"
-              onError={(e) => {
-                (e.target as HTMLImageElement).src = defaultLogoPath;
-              }}
-            />
-          )}
-        </div>
+        {(loadingRestaurantInfo || logoPath) && (
+          <div className="mb-5">
+            {loadingRestaurantInfo ? (
+              <Skeleton className="h-32 w-32 rounded-2xl" />
+            ) : (
+              <img
+                src={logoPath!}
+                alt={restaurantInfo?.name || 'Restaurant'}
+                className="h-32 w-32 object-contain"
+              />
+            )}
+          </div>
+        )}
 
         {/* Restaurant name */}
         {loadingRestaurantInfo ? (
