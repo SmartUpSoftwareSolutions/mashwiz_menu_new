@@ -1,5 +1,5 @@
 
-import React, { useCallback, useEffect, useMemo } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useForm, useFieldArray } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -26,7 +26,7 @@ import {
   FormDescription
 } from "@/components/ui/form";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Clock, MapPin, Phone, RotateCcw, Settings } from "lucide-react";
+import { AlertCircle, Clock, MapPin, Phone, RotateCcw, Settings } from "lucide-react";
 
 const dayScheduleSchema = z.object({
   day: z.string(),
@@ -39,7 +39,7 @@ const locationSchema = z.object({
   name: z.string().min(1, { message: 'Name is required' }),
   address: z.string().min(1, { message: 'Address is required' }),
   city: z.string().min(1, { message: 'City is required' }),
-  map_link: z.string().url({ message: 'Must be a valid URL' }),
+  map_link: z.union([z.string().url({ message: 'Must be a valid URL' }), z.literal("")]).default(""),
   phone: z.string().optional(),
   is_open_24_7: z.boolean().default(false),
   working_hours: z.array(dayScheduleSchema).default([])
@@ -66,12 +66,12 @@ const createDefaultValues = (): LocationFormValues => ({
 });
 
 export const LocationFormDialog: React.FC<LocationFormDialogProps> = ({
-  isOpen,
   setIsOpen,
   editingLocation,
   onSubmit,
   isPending
 }) => {
+  const [activeTab, setActiveTab] = useState("details");
   const defaultValues = useMemo(() => createDefaultValues(), []);
 
   const form = useForm<LocationFormValues>({
@@ -109,6 +109,7 @@ export const LocationFormDialog: React.FC<LocationFormDialogProps> = ({
   }, [form]);
 
   useEffect(() => {
+    setActiveTab("details");
     if (editingLocation) {
       form.reset({
         name: editingLocation.name,
@@ -126,6 +127,12 @@ export const LocationFormDialog: React.FC<LocationFormDialogProps> = ({
       form.reset(createDefaultValues());
     }
   }, [editingLocation, form]);
+
+  const detailFields = ["name", "address", "city", "map_link", "phone"] as const;
+  const handleInvalid = useCallback((errors: object) => {
+    const hasDetailError = detailFields.some((f) => f in errors);
+    if (hasDetailError) setActiveTab("details");
+  }, []);
 
   return (
     <DialogContent className="max-h-[92vh] overflow-hidden rounded-[32px] border border-orange-100 bg-gradient-to-br from-orange-50 via-white to-orange-100 p-0 shadow-2xl backdrop-blur-xl">
@@ -159,20 +166,26 @@ export const LocationFormDialog: React.FC<LocationFormDialogProps> = ({
             </div>
           </div>
         </DialogHeader>
-        <ScrollArea className="max-h-[calc(92vh-180px)]">
-          <div className="px-6 pb-6">
-            <Form {...form}>
-              <form
-                onSubmit={form.handleSubmit(onSubmit)}
-                className="flex flex-col gap-4"
-              >
-                <Tabs defaultValue="details" className="space-y-4">
+        <Form {...form}>
+          <form
+            onSubmit={form.handleSubmit(onSubmit, handleInvalid)}
+            className="flex flex-col overflow-hidden"
+            style={{ maxHeight: "calc(92vh - 180px)" }}
+          >
+        <ScrollArea className="flex-1">
+          <div className="px-6 pb-2">
+                <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
                   <TabsList className="grid w-fit grid-cols-2 rounded-full bg-orange-100/50 p-1 text-[11px] font-semibold text-orange-700">
                     <TabsTrigger
                       value="details"
                       className="rounded-full px-4 py-1.5 data-[state=active]:bg-white data-[state=active]:text-orange-600 data-[state=active]:shadow-sm"
                     >
-                      Details
+                      <span className="flex items-center gap-1">
+                        Details
+                        {detailFields.some((f) => f in form.formState.errors) && (
+                          <AlertCircle className="h-3 w-3 text-red-500" />
+                        )}
+                      </span>
                     </TabsTrigger>
                     <TabsTrigger
                       value="hours"
@@ -449,28 +462,27 @@ export const LocationFormDialog: React.FC<LocationFormDialogProps> = ({
                     </div>
                   </TabsContent>
                 </Tabs>
-
-                <DialogFooter className="flex flex-col-reverse gap-3 pt-2 sm:flex-row sm:justify-end">
-                  <Button
-                    variant="outline"
-                    type="button"
-                    onClick={() => setIsOpen(false)}
-                    className="border-slate-200 text-slate-600 hover:bg-slate-100"
-                  >
-                    Cancel
-                  </Button>
-                  <Button
-                    type="submit"
-                    disabled={isPending}
-                    className="bg-gradient-to-r from-orange-500 to-orange-600 text-white shadow-md transition hover:from-orange-600 hover:to-orange-700"
-                  >
-                    {editingLocation ? "Update" : "Create"}
-                  </Button>
-                </DialogFooter>
-              </form>
-            </Form>
-          </div>
-        </ScrollArea>
+              </div>
+            </ScrollArea>
+            <DialogFooter className="flex flex-col-reverse gap-3 border-t border-orange-100 px-6 py-4 sm:flex-row sm:justify-end">
+              <Button
+                variant="outline"
+                type="button"
+                onClick={() => setIsOpen(false)}
+                className="border-slate-200 text-slate-600 hover:bg-slate-100"
+              >
+                Cancel
+              </Button>
+              <Button
+                type="submit"
+                disabled={isPending}
+                className="bg-gradient-to-r from-orange-500 to-orange-600 text-white shadow-md transition hover:from-orange-600 hover:to-orange-700"
+              >
+                {editingLocation ? "Update" : "Create"}
+              </Button>
+            </DialogFooter>
+          </form>
+        </Form>
       </div>
     </DialogContent>
   );
