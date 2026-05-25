@@ -29,7 +29,7 @@ const masterDBConfig = {
 }
 const clientDBConfig = {
     ...baseDBConfig,
-    database: 'MASHWIZ'}
+    database: process.env.ERP_DATABASE_NAME || 'MASHWIZ'}
 
 // Master DB connection pool
 export const SqlServerDB = new sql.ConnectionPool(clientDBConfig);
