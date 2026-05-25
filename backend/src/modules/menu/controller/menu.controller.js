@@ -5,13 +5,14 @@ import { erpQuery, prisma } from "../../query/controller/query.controller.js";
 import logger from "../../../utils/logger.js";
 import { connectToDatabase, SqlServerDB } from "../../../../DB/sqlConnection.js";
 
-/** ERP pool for this request: master DB or logged-in client's SQL database. */
+/** ERP pool: uses ERP_DATABASE_NAME from env if set, otherwise falls back to the user's database. */
 async function getErpPoolForRequest(req) {
-  if (!req.user?.databaseName) {
+  const dbName = process.env.ERP_DATABASE_NAME || req.user?.databaseName;
+  if (!dbName) {
     return { dbPool: SqlServerDB, close: null };
   }
   try {
-    const dbPool = await connectToDatabase(req.user.databaseName);
+    const dbPool = await connectToDatabase(dbName);
     return {
       dbPool,
       close: () => dbPool.close().catch(() => {}),
@@ -21,106 +22,54 @@ async function getErpPoolForRequest(req) {
   }
 }
 
-/** 🔹 Sync branches to restaurant_branches table (optimized with parallel operations) */
+/** 🔹 Get allowed branch codes from local branches table */
+async function getAllowedBranchCodes() {
+  try {
+    const rows = await prisma.branch.findMany({ select: { code: true } });
+    return new Set(rows.map((r) => r.code));
+  } catch {
+    return null; // null = no filter (allow all)
+  }
+}
+
+/** 🔹 Sync branches to restaurant_branches table — only updates existing branches, never creates new ones */
 const syncBranchesToRestaurantBranches = async (branchesToSync) => {
   try {
     if (!branchesToSync || branchesToSync.length === 0) {
       return { success: true, synced: 0 };
     }
 
-    logger.info(`Syncing ${branchesToSync.length} branches to restaurant_branches table...`);
-    
-    // Filter valid branches and create upsert promises
     const validBranches = branchesToSync.filter(branch => branch.code && branch.name);
-
-    if (validBranches.length === 0) {
-      logger.warn("No valid branches to sync");
-      return { success: true, synced: 0 };
-    }
-
-    // Check if restaurantBranch model exists (graceful fallback with timeout)
-    try {
-      // Test if model exists by trying a simple query with timeout
-      await Promise.race([
-        prisma.restaurantBranch.findFirst({ take: 1 }),
-        new Promise((_, reject) =>
-          setTimeout(() => reject(new Error('Model check timeout')), 5000)
-        ),
-      ]);
-    } catch (modelError) {
-      // If it's a timeout or connection pool error, skip gracefully
-      if (
-        modelError.message?.includes('restaurantBranch') ||
-        modelError.message?.includes('restaurant_branches') ||
-        modelError.message?.includes('timeout') ||
-        modelError.message?.includes('connection pool')
-      ) {
-        logger.warn("restaurant_branches table/model not available or connection issue, skipping branch sync:", modelError.message);
-        return { success: true, synced: 0, skipped: true };
-      }
-      throw modelError;
-    }
-
-    // Process in chunks to avoid overwhelming connection pool
-    const chunkSize = 50;
-    const chunks = [];
-    for (let i = 0; i < validBranches.length; i += chunkSize) {
-      chunks.push(validBranches.slice(i, i + chunkSize));
-    }
+    if (validBranches.length === 0) return { success: true, synced: 0 };
 
     let totalSuccessful = 0;
     let totalFailed = 0;
 
-    // Process chunks sequentially, but operations within chunk in parallel
-    for (const chunk of chunks) {
-      const upsertPromises = chunk.flatMap((branch) => [
-        prisma.restaurantBranch.upsert({
-          where: {
-            branch_code: branch.code,
-          },
-          update: {
-            branch_name: branch.name,
-            updated_at: new Date(),
-          },
-          create: {
-            branch_code: branch.code,
-            branch_name: branch.name,
-            company: null,
-          },
+    for (const branch of validBranches) {
+      const results = await Promise.allSettled([
+        prisma.restaurantBranch.updateMany({
+          where: { branch_code: branch.code },
+          data: { branch_name: branch.name, updated_at: new Date() },
         }),
-        prisma.branch.upsert({
+        prisma.branch.updateMany({
           where: { code: branch.code },
-          update: { name: branch.name },
-          create: { code: branch.code, name: branch.name },
+          data: { name: branch.name },
         }),
       ]);
 
-      const results = await Promise.allSettled(upsertPromises);
-      
-      const successful = results.filter(r => r.status === 'fulfilled').length;
-      const failed = results.filter(r => r.status === 'rejected').length;
-
-      totalSuccessful += successful;
-      totalFailed += failed;
-
-      if (failed > 0) {
-        results.forEach((result, index) => {
-          if (result.status === 'rejected') {
-            logger.error(`Error upserting branch ${chunk[index].code}:`, result.reason?.message || result.reason);
-          }
-        });
-      }
+      results.forEach((r) => {
+        if (r.status === 'fulfilled') totalSuccessful++;
+        else {
+          totalFailed++;
+          logger.error(`Error updating branch ${branch.code}:`, r.reason?.message);
+        }
+      });
     }
 
-    if (totalFailed > 0) {
-      logger.warn(`${totalFailed} branch upserts failed out of ${validBranches.length}`);
-    }
-
-    logger.info(`✅ Successfully synced ${totalSuccessful} branches to restaurant_branches table`);
+    logger.info(`✅ Updated ${totalSuccessful} branch records`);
     return { success: true, synced: totalSuccessful, failed: totalFailed };
   } catch (error) {
-    logger.error("Error syncing branches to restaurant_branches:", error);
-    // Don't fail the entire sync if branch sync fails
+    logger.error("Error syncing branches:", error);
     return { success: false, error: error.message, skipped: true };
   }
 };
@@ -231,9 +180,10 @@ export const syncAllBranchesStream = async (req, res) => {
 
   try {
     let dbPool = SqlServerDB;
-    if (req.user?.databaseName) {
+    const erpDbName = process.env.ERP_DATABASE_NAME || req.user?.databaseName;
+    if (erpDbName) {
       try {
-        dbPool = await connectToDatabase(req.user.databaseName);
+        dbPool = await connectToDatabase(erpDbName);
       } catch (connError) {
         send({ type: "error", message: `Failed to connect to database: ${connError.message}` });
         return res.end();
@@ -255,15 +205,17 @@ export const syncAllBranchesStream = async (req, res) => {
       return res.end();
     }
 
+    const allowedCodes = await getAllowedBranchCodes();
+
     const branchesToSync = branchRecords
       .map((b) => ({
         code: b?.BRANCH_CODE?.trim?.() || b?.branch_code?.trim?.() || "",
         name: b?.BRANCH_NAME?.trim?.() || b?.BRANCH_CODE?.trim?.() || "",
       }))
-      .filter((b) => b.code);
+      .filter((b) => b.code && (!allowedCodes || allowedCodes.has(b.code)));
 
     if (branchesToSync.length === 0) {
-      send({ type: "error", message: "No branches found to sync." });
+      send({ type: "error", message: "No matching branches found. Ensure branches are configured in the Branches admin page." });
       return res.end();
     }
 
@@ -317,17 +269,17 @@ export const syncAllBranchesStream = async (req, res) => {
 
 export const syncAllBranches = asyncHandler(async (req, res) => {
   let dbPool = SqlServerDB; // Default to the main connection
+  const erpDbName = process.env.ERP_DATABASE_NAME || req.user?.databaseName;
   try {
-    // Check if we need to switch databases based on authenticated user
-    if (req.user?.databaseName) {
-      logger.info(`Switching to database: ${req.user.databaseName} for sync operation`);
+    if (erpDbName) {
+      logger.info(`Switching to database: ${erpDbName} for sync operation`);
       try {
-        dbPool = await connectToDatabase(req.user.databaseName);
+        dbPool = await connectToDatabase(erpDbName);
       } catch (connError) {
-        logger.error(`Failed to connect to database ${req.user.databaseName}:`, connError);
+        logger.error(`Failed to connect to database ${erpDbName}:`, connError);
         return res.status(500).json({
           success: false,
-          message: `Failed to connect to target database: ${req.user.databaseName}`,
+          message: `Failed to connect to target database: ${erpDbName}`,
           error: connError.message,
         });
       }
@@ -358,6 +310,8 @@ export const syncAllBranches = asyncHandler(async (req, res) => {
       
     }
 
+    const allowedCodes = await getAllowedBranchCodes();
+
     const branchesToSync = branchRecords
       .map((branch) => ({
         code:
@@ -372,13 +326,12 @@ export const syncAllBranches = asyncHandler(async (req, res) => {
           branch?.BRANCH_CODE?.trim?.() ||
           "",
       }))
-      .filter((branch) => branch.code);
+      .filter((branch) => branch.code && (!allowedCodes || allowedCodes.has(branch.code)));
 
     if (branchesToSync.length === 0) {
       return res.status(404).json({
         success: false,
-        message:
-          "No branches were found to sync. Please provide branch codes or ensure ERP branch configuration is available.",
+        message: "No matching branches found. Ensure branches are configured in the Branches admin page.",
       });
     }
 
@@ -387,7 +340,7 @@ export const syncAllBranches = asyncHandler(async (req, res) => {
     for (const branch of branchesToSync) {
       try {
         logger.info(`Starting sync for branch ${branch.code} (items + locations)`);
-        
+
         // Items sync - catch errors to prevent crashes
         let itemsResult;
         try {
@@ -520,17 +473,17 @@ export const truncateAndSyncAllBranches = asyncHandler(async (req, res) => {
     logger.info("Starting truncate and sync operation - clearing all Supabase data...");
 
     let dbPool = SqlServerDB; // Default to the main connection
-    
-    // Check if we need to switch databases based on authenticated user
-    if (req.user?.databaseName) {
-      logger.info(`Switching to database: ${req.user.databaseName} for truncate-and-sync operation`);
+    const erpDbName = process.env.ERP_DATABASE_NAME || req.user?.databaseName;
+
+    if (erpDbName) {
+      logger.info(`Switching to database: ${erpDbName} for truncate-and-sync operation`);
       try {
-        dbPool = await connectToDatabase(req.user.databaseName);
+        dbPool = await connectToDatabase(erpDbName);
       } catch (connError) {
-        logger.error(`Failed to connect to database ${req.user.databaseName}:`, connError);
+        logger.error(`Failed to connect to database ${erpDbName}:`, connError);
         return res.status(500).json({
           success: false,
-          message: `Failed to connect to target database: ${req.user.databaseName}`,
+          message: `Failed to connect to target database: ${erpDbName}`,
           error: connError.message,
         });
       }
@@ -585,6 +538,8 @@ export const truncateAndSyncAllBranches = asyncHandler(async (req, res) => {
       `, {}, dbPool);
     }
 
+    const allowedCodesForTruncate = await getAllowedBranchCodes();
+
     const branchesToSync = branchRecords
       .map((branch) => ({
         code:
@@ -599,13 +554,12 @@ export const truncateAndSyncAllBranches = asyncHandler(async (req, res) => {
           branch?.BRANCH_CODE?.trim?.() ||
           "",
       }))
-      .filter((branch) => branch.code);
+      .filter((branch) => branch.code && (!allowedCodesForTruncate || allowedCodesForTruncate.has(branch.code)));
 
     if (branchesToSync.length === 0) {
       return res.status(404).json({
         success: false,
-        message:
-          "No branches were found to sync. Please provide branch codes or ensure ERP branch configuration is available.",
+        message: "No matching branches found. Ensure branches are configured in the Branches admin page.",
       });
     }
 
