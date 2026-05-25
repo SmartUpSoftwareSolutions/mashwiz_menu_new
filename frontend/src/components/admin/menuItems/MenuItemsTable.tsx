@@ -574,7 +574,7 @@ const handleItemOrderSave = async (item: MenuItemWithBranch, itemKey: string) =>
                         <TableCell>
                           <Input
                             type="number"
-                            value={itemOrderInputs[itemKey] ?? item.itemOrder ?? ""}
+                            value={itemOrderInputs[itemKey] ?? (item.itemOrder || "")}
                             onChange={(event) =>
                               handleItemOrderChange(itemKey, event.target.value)
                             }
@@ -714,7 +714,7 @@ const handleItemOrderSave = async (item: MenuItemWithBranch, itemKey: string) =>
                         </label>
                         <Input
                           type="number"
-                          value={itemOrderInputs[itemKey] ?? item.itemOrder ?? ""}
+                          value={itemOrderInputs[itemKey] ?? (item.itemOrder || "")}
                           onChange={(event) =>
                             handleItemOrderChange(itemKey, event.target.value)
                           }
