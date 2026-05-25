@@ -32,7 +32,7 @@ const syncBranchesToRestaurantBranches = async (branchesToSync) => {
     
     // Filter valid branches and create upsert promises
     const validBranches = branchesToSync.filter(branch => branch.code && branch.name);
-    
+
     if (validBranches.length === 0) {
       logger.warn("No valid branches to sync");
       return { success: true, synced: 0 };
@@ -43,14 +43,14 @@ const syncBranchesToRestaurantBranches = async (branchesToSync) => {
       // Test if model exists by trying a simple query with timeout
       await Promise.race([
         prisma.restaurantBranch.findFirst({ take: 1 }),
-        new Promise((_, reject) => 
+        new Promise((_, reject) =>
           setTimeout(() => reject(new Error('Model check timeout')), 5000)
         ),
       ]);
     } catch (modelError) {
       // If it's a timeout or connection pool error, skip gracefully
       if (
-        modelError.message?.includes('restaurantBranch') || 
+        modelError.message?.includes('restaurantBranch') ||
         modelError.message?.includes('restaurant_branches') ||
         modelError.message?.includes('timeout') ||
         modelError.message?.includes('connection pool')
@@ -73,7 +73,7 @@ const syncBranchesToRestaurantBranches = async (branchesToSync) => {
 
     // Process chunks sequentially, but operations within chunk in parallel
     for (const chunk of chunks) {
-      const upsertPromises = chunk.map((branch) =>
+      const upsertPromises = chunk.flatMap((branch) => [
         prisma.restaurantBranch.upsert({
           where: {
             branch_code: branch.code,
@@ -87,8 +87,13 @@ const syncBranchesToRestaurantBranches = async (branchesToSync) => {
             branch_name: branch.name,
             company: null,
           },
-        })
-      );
+        }),
+        prisma.branch.upsert({
+          where: { code: branch.code },
+          update: { name: branch.name },
+          create: { code: branch.code, name: branch.name },
+        }),
+      ]);
 
       const results = await Promise.allSettled(upsertPromises);
       
@@ -238,15 +243,9 @@ export const syncAllBranchesStream = async (req, res) => {
     let branchRecords;
     try {
       branchRecords = await erpQuery(
-        `SELECT DISTINCT
-          B.BRANCH AS BRANCH_CODE,
-          COALESCE(BS.BRANCH_NAME, B.BRANCH) AS BRANCH_NAME
-        FROM SYS_COMPANY_BRANCHES_SETUP B
-        LEFT JOIN SYS_COMPANY_BRANCHES BS ON BS.BRANCH_CODE = B.BRANCH
-        WHERE B.TYPE_CODE = 'ITEM_GROUP'
-          AND B.BRANCH IS NOT NULL
-          AND LTRIM(RTRIM(B.BRANCH)) <> ''
-          AND BS.Active = 1
+        `SELECT BRANCH_CODE, BRANCH_NAME
+        FROM SYS_COMPANY_BRANCHES
+        WHERE Active = 1
         ORDER BY BRANCH_CODE;`,
         {},
         dbPool
@@ -351,17 +350,9 @@ export const syncAllBranches = asyncHandler(async (req, res) => {
       }));
     } else {
       branchRecords = await erpQuery(`
-        SELECT DISTINCT 
-          B.BRANCH AS BRANCH_CODE,
-          COALESCE(BS.BRANCH_NAME, B.BRANCH) AS BRANCH_NAME
-        FROM SYS_COMPANY_BRANCHES_SETUP B
-        LEFT JOIN SYS_COMPANY_BRANCHES BS
-          ON BS.BRANCH_CODE = B.BRANCH
-        WHERE 
-          B.TYPE_CODE = 'ITEM_GROUP'
-          AND B.BRANCH IS NOT NULL
-          AND LTRIM(RTRIM(B.BRANCH)) <> ''
-          AND BS.Active = 1           -- ✅ only active branches
+        SELECT BRANCH_CODE, BRANCH_NAME
+        FROM SYS_COMPANY_BRANCHES
+        WHERE Active = 1
         ORDER BY BRANCH_CODE;
       `, {}, dbPool);
       
@@ -587,17 +578,9 @@ export const truncateAndSyncAllBranches = asyncHandler(async (req, res) => {
       }));
     } else {
       branchRecords = await erpQuery(`
-        SELECT DISTINCT 
-          B.BRANCH AS BRANCH_CODE,
-          COALESCE(BS.BRANCH_NAME, B.BRANCH) AS BRANCH_NAME
-        FROM SYS_COMPANY_BRANCHES_SETUP B
-        LEFT JOIN SYS_COMPANY_BRANCHES BS
-          ON BS.BRANCH_CODE = B.BRANCH
-        WHERE 
-          B.TYPE_CODE = 'ITEM_GROUP'
-          AND B.BRANCH IS NOT NULL
-          AND LTRIM(RTRIM(B.BRANCH)) <> ''
-          AND BS.Active = 1
+        SELECT BRANCH_CODE, BRANCH_NAME
+        FROM SYS_COMPANY_BRANCHES
+        WHERE Active = 1
         ORDER BY BRANCH_CODE;
       `, {}, dbPool);
     }
