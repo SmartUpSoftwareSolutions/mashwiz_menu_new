@@ -44,7 +44,7 @@ class MenuService {
       descriptionAr: item.website_description_ar,
       price:
         item.sales_price != null
-          ? `$${Number(item.sales_price).toFixed(2)}`
+          ? `${Number(item.sales_price).toFixed(2)}`
           : "",
       category: item.itm_group_code,
       image: item.image?.trim() || "",
